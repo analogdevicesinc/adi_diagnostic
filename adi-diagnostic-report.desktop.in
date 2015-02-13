@@ -1,0 +1,8 @@
+[Desktop Entry]
+Exec=@PREFIX@/bin/adi_diagnostic_report --gui
+Icon=utilities-system-monitor
+Terminal=false
+Type=Application
+Categories=System
+Name=ADI Diagnostic Report
+GenericName=ADI Diagnostic Report

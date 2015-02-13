@@ -1,0 +1,484 @@
+#!/usr/bin/env python2
+# -*- coding: iso-8859-15 -*-
+#
+# Copyright (C) 2015 Analog Devices, Inc.
+#
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without modification,
+# are permitted provided that the following conditions are met:
+#     - Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+#     - Redistributions in binary form must reproduce the above copyright
+#       notice, this list of conditions and the following disclaimer in
+#       the documentation and/or other materials provided with the
+#       distribution.
+#     - Neither the name of Analog Devices, Inc. nor the names of its
+#       contributors may be used to endorse or promote products derived
+#       from this software without specific prior written permission.
+#     - The use of this software may or may not infringe the patent rights
+#       of one or more patent holders.  This license does not release you
+#       from the requirement that you obtain separate licenses from these
+#       patent holders to use this software.
+#     - Use of the software either in source or binary form, must be run
+#       on or directly connected to an Analog Devices Inc. component.
+#    
+# THIS SOFTWARE IS PROVIDED BY ANALOG DEVICES 'AS IS' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+# INCLUDING, BUT NOT LIMITED TO, NON-INFRINGEMENT, MERCHANTABILITY AND FITNESS FOR A
+# PARTICULAR PURPOSE ARE DISCLAIMED.
+#
+# IN NO EVENT SHALL ANALOG DEVICES BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, INTELLECTUAL PROPERTY
+# RIGHTS, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR 
+# BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF 
+# THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# For more information visit:
+#   http://wiki.analog.com/resources/tools-software/linux-software/diagnostic_report
+
+HELP_URL = 'http://wiki.analog.com/resources/tools-software/linux-software/diagnostic_report'
+
+import time
+import os
+import sys
+import subprocess
+import tarfile
+import StringIO
+
+class DiagnosticReport():
+    
+    def __init__(self, func, name, description, default_enabled):
+        self.func = func
+        self.name = name
+        self.description = description
+        self.default_enabled = default_enabled
+        self.enabled = default_enabled
+
+def exec_program(cmd, cwd=None):
+    try:
+        p = subprocess.Popen(cmd.split(' '), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, cwd=cwd)
+
+        stdout, stderr = p.communicate()
+
+        return stdout
+    except Exception, e:
+        return str(e)
+ 
+def read_file(*path):
+    name = os.path.join(*path)
+
+    if not os.path.exists(name) or os.path.isdir(name):
+        return None
+
+    f = open(name)
+    buf = f.read()
+    f.close()
+    return buf
+
+def read_files(path):
+    if not os.path.exists(path):
+        return None
+
+    result = {}
+
+    for f in os.listdir(path):
+        _f = os.path.join(path, f)
+        if os.path.isdir(_f):
+            continue
+        result[f] = read_file(_f)
+
+    return result
+
+def read_files_recursive(path):
+    if not os.path.exists(path):
+        return None
+
+    result = {}
+
+    for f in os.listdir(path):
+        _f = os.path.join(path, f)
+        if os.path.isdir(_f):
+            result[f] = read_files_recursive(_f)
+        else:
+            result[f] = read_file(_f)
+
+    return result
+
+def find_files(path, name):
+    if not os.path.exists(path):
+        return []
+
+    result = []
+
+    for dir, dirs, files in os.walk(path):
+        for f in files:
+            if f == name:
+                result.append(os.path.join(dir, f))
+
+    return result
+
+def read_file_subdirs(f, path):
+    if not os.path.exists(path):
+        return None
+
+    result = {}
+
+    for d in os.listdir(path):
+        result[d] = read_file(path, d, f)
+
+    return result
+
+def list_files_recursive(path):
+    result = []
+    for dir, dirs, files in os.walk(path):
+        for f in files:
+            result.append(os.path.join(dir, f))
+        for d in dirs:
+            d = os.path.join(dir, d)
+            if os.path.islink(d):
+                result.append(d)
+
+    return result
+
+
+report_list = []
+
+def diagnostic(name, description, default_enabled=True):
+    def f(func):
+        global report_list
+        report_list.append(DiagnosticReport(func, name, description,
+                default_enabled))
+        return func
+        
+    return f
+
+@diagnostic('dmesg', "Boot log (dmesg)")
+def get_dmesg_info():
+    return {'dmesg': exec_program('dmesg')}
+
+@diagnostic('uname', "Kernel Version (uname)")
+def get_uname_info():
+    return {'uname': exec_program('uname -a')}
+
+@diagnostic('os-release', "OS version (/etc/os-release)")
+def get_os_release_info():
+    return {'os-release': read_file('/etc/os-release')}
+
+@diagnostic('hdl_info', "Bitstream information")
+def get_hdl_info():
+    return {'hdl_info': read_file('/sys/kernel/debug/adi_diagnostic/info')}
+
+@diagnostic('clocks', "Clock information")
+def get_clock_info():
+    result = dict()
+
+    result['clk_summary'] = read_file('/sys/kernel/debug/clk/clk_summary')
+
+    if os.path.exists('/sys/kernel/debug/adi_diagnostic'):
+        result['clock_mon'] = read_files('/sys/kernel/debug/adi_diagnostic/clock_monitor')
+
+    return {'clocks': result}
+
+@diagnostic('status', "Board status signals")
+def get_status_info():
+    return {'status_monitor': read_files('/sys/kernel/debug/adi_diagnostic/status_monitor')}
+
+@diagnostic('video', "Video out information")
+def get_video_info():
+    path = '/sys/class/drm'
+    if not os.path.exists(path):
+        return None
+
+    result = {}
+
+    for f in os.listdir(path):
+        if not os.path.exists(os.path.join(path, f, 'status')):
+            continue
+        result[f] = read_files(os.path.join(path, f))
+
+    return {'video_out': result}
+
+@diagnostic('iio_info', "IIO device information (iio_info)")
+def get_iio_info():
+    return {'iio_info': exec_program('iio_info')}
+
+@diagnostic('kernel_config', "Kernel configuraton")
+def get_kernel_config_info():
+    return {'kernel_config.gz': read_file('/proc/config.gz')}
+
+@diagnostic('interrupts', "Interrupts (/proc/interrupts)")
+def get_interrupt_info():
+    return {'proc_interrupts': read_file('/proc/interrupts')}
+
+@diagnostic('iomem', "IO memory mappings (/proc/iomem)")
+def get_iomem_info():
+    return {'proc_iomem': read_file('/proc/iomem')}
+
+@diagnostic('cmdline', "Kernel command line (/proc/cmdline)")
+def get_iomem_info():
+    return {'proc_cmdline': read_file('/proc/cmdline')}
+
+@diagnostic('regmap', "Device register settings (regmap)")
+def get_regmap_info():
+    if not os.path.exists('/sys/kernel/debug/regmap/'):
+        return None
+
+    return {'regmap': read_file_subdirs('registers', '/sys/kernel/debug/regmap/')}
+
+@diagnostic('src_rev', "ADI tools source revisions")
+def get_software_source_revision():
+    if not os.path.exists('/usr/local/src/'):
+        return None
+
+    result = {}
+
+    for d in os.listdir('/usr/local/src/'):
+        src = os.path.join('/usr/local/src/', d)
+        result[d] = exec_program('git rev-parse HEAD', cwd=src)
+
+    return {'software_revision': result}
+
+@diagnostic('mount', "Mounted filesystems (mount)")
+def get_mount_info():
+    return {'mount': exec_program('mount')}
+
+@diagnostic('boot', "BOOT partition information")
+def get_boot_version():
+    if not os.path.exists('/media/boot/VERSION'):
+        return None
+
+    return {'boot_version': read_file('/media/boot/VERSION')}
+
+@diagnostic('fru', "FMC FRU EEPROMs")
+def get_fru_eeprom_info():
+    result = {}
+    for f in find_files('/sys/devices/', 'eeprom'):
+        name = os.path.basename(os.path.dirname(f))
+        result[name] = exec_program('fru-dump -b \'{}\''.format(f))
+    return {'fru': result}
+
+@diagnostic('xorg', "Display Server log (Xorg)")
+def get_xorg_log():
+    return {'Xorg.log': read_file('/var/log/Xorg.0.log')}
+
+@diagnostic('devicetree', "Devicetree (/proc/device-tree/)")
+def get_devicetree():
+    return {'devicetree': read_files_recursive('/proc/device-tree')}
+
+@diagnostic('network', "Network configuration", False)
+def get_ifconfig():
+    return {'network': {
+        'ifconfig': exec_program('/sbin/ifconfig -a'),
+        'route': exec_program('/sbin/route -n'),
+        }}
+
+@diagnostic('char_dev', 'Character devices (/dev/)', True)
+def get_char_devs():
+    return {'char_dev': '\n'.join(list_files_recursive('/dev/'))}
+
+@diagnostic('sys_bus', 'Registered devices and drivers (/sys/bus/{platform,i2c,spi}/)', True)
+def get_sys_bus():
+    l = list_files_recursive('/sys/bus/platform')
+    l += list_files_recursive('/sys/bus/i2c')
+    l += list_files_recursive('/sys/bus/spi')
+    return {'sys_bus': '\n'.join(l)}
+
+def add_report_to_archive(t, report, parent = ''):
+
+    for name,value in report.items():
+        if type(value) is dict:
+            info = tarfile.TarInfo(os.path.join(parent, name))
+            info.mtime = time.time()
+            info.type = tarfile.DIRTYPE
+            t.addfile(info)
+            add_report_to_archive(t, value, os.path.join(parent, name))
+        elif value is not None:
+            info = tarfile.TarInfo(os.path.join(parent, name))
+            s = str(value)
+            info.size = len(s)
+            info.mtime = time.time()
+            info.type = tarfile.REGTYPE
+            t.addfile(info, StringIO.StringIO(s))
+
+def create_diagnostic_report(filename):
+    report = {}
+    for r in report_list:
+        if not r.enabled:
+            continue
+        x = r.func()
+        if x is not None:
+            report.update(x)
+
+    if filename == '-':
+        f = tarfile.open(None, 'w:bz2', sys.stdout)
+    else:
+        f = tarfile.open(filename, 'w:bz2')
+    add_report_to_archive(f, report)
+    f.close()
+
+def parse_list(l):
+    if l is None:
+        return []
+
+    return map(str.strip, l.split(','))
+
+def enable_reports(report_names, enable):
+    if report_names is None:
+        for r in report_list:
+            r.enabled = enable
+        return
+
+    for i in report_names:
+        i = i.strip()
+        found = False
+        for r in report_list:
+            if r.name == i:
+                r.enabled = enable
+                found = True
+                break
+        if not found:
+            print('Unknown report "%s"' % i)
+
+def list_reports():
+    c_width = [len('Name'), len("Description")]
+    for r in report_list:
+        c_width = [
+            max(len(r.name), c_width[0]),
+            max(len(r.description), c_width[1])]
+
+    print('%-*s | %-*s | %s' % (c_width[0], "Name", c_width[1], "Description", "Default Enabled"))
+    print('%s-+-%s-+-%s' % ('-' * c_width[0], '-' * c_width[1], '-' * 17))
+    for r in sorted(report_list, key=lambda r: r.name):
+        print('%-*s | %-*s | %s' % (c_width[0], r.name, c_width[1], r.description, r.default_enabled))
+
+
+def gui_generate_report(w, builder, infobar):
+    if builder.get_object('radio_boot').get_active():
+        path = '/media/boot/'
+    elif builder.get_object('radio_network').get_active():
+        path = '/media/network/'
+    else:
+        path = builder.get_object('filechooserbutton_other').get_filename()
+
+    try:
+        f = open(os.path.join(path, 'diagnostic_report.tar.bz2'), 'w')
+        p = subprocess.Popen(['gksudo', '-k', '-S',
+            '-D', 'ADI Diagnostic Report',
+            '{} --file-name - --disable all --enable {}'.format(sys.argv[0],
+            ','.join([r.name for r in report_list if r.enabled]))],
+            stdout=f, stderr=subprocess.PIPE)
+        stdout, stderr = p.communicate()
+        f.close()
+        print(stderr)
+        print(['gksudo', '-k', '-S',
+            '-D', 'ADI Diagnostic Report',
+            '{} --file-name - --disable all --enable {}'.format(sys.argv[0],
+            ','.join([r.name for r in report_list if r.enabled]))])
+        infobar.set_message_type(Gtk.MessageType.INFO)
+        infobar.get_content_area().get_children()[0].set_text(
+            'Successfully generated report.')
+        infobar.show()
+    except Exception, e:
+        infobar.set_message_type(Gtk.MessageType.ERROR)
+        infobar.get_content_area().get_children()[0].set_text(
+            'Failed to generate report: "{}".'.format(e))
+        infobar.show()
+
+def gui_enable_toggle(cell, path, model):
+    if path is not None:
+        it = model.get_iter(path)
+        model[it][0].enabled = not model[it][0].enabled
+
+def gui_run():
+    builder = Gtk.Builder()
+    if os.path.exists('adi_diagnostic_report.glade'):
+        builder.add_from_file('adi_diagnostic_report.glade')
+    else:
+        builder.add_from_file('/usr/local/share/adi_diagnostic_report/adi_diagnostic_report.glade')
+
+    label = Gtk.Label()
+    label.set_line_wrap(True)
+    label.set_max_width_chars(45)
+    label.show()
+    infobar = Gtk.InfoBar()
+    builder.get_object('main_box').pack_start(infobar, False, False, 0)
+    infobar.get_content_area().add(label)
+    infobar.set_default_response(Gtk.ResponseType.CLOSE)
+    try:
+        infobar.set_show_close_button(True)
+    except Exception, e:
+        infobar.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)    
+    infobar.connect("response", lambda w, r: w.hide())
+
+    builder.get_object('help_button').connect('clicked', lambda w: Gtk.show_uri(None, HELP_URL, 0))
+    builder.get_object('quit_button').connect('clicked', lambda w: Gtk.main_quit())
+    builder.get_object('generate_button').connect('clicked', gui_generate_report, builder, infobar)
+    store = builder.get_object('report_liststore')
+
+    col = builder.get_object('report_column')
+    cell = builder.get_object('enable_cellrenderer')
+    cell.connect('toggled', gui_enable_toggle, store)
+    col.set_cell_data_func(cell, lambda column, cell, model, iter, data:
+            cell.set_property('active', model.get_value(iter, 0).enabled))
+    cell = builder.get_object('description_cellrenderertext')
+    col.set_cell_data_func(cell, lambda column, cell, model, iter, data:
+            cell.set_property('text', model.get_value(iter, 0).description))
+
+    for r in sorted(report_list, key=lambda r: r.name):
+        store.append([r])
+
+    window = builder.get_object('main_window')    
+    window.connect('destroy', lambda x: Gtk.main_quit())
+    window.show()
+    Gtk.main()
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+        epilog='For more information visit:\n  {}'.format(HELP_URL),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--gui', action='store_true', help='Launch graphical user interface')
+    parser.add_argument('--list', action='store_true', help='List all diagnostic reports')
+    parser.add_argument('--enable', help='List of reports to enable or \'all\'', metavar='list')
+    parser.add_argument('--disable', help='List of reports to disable or \'all\'', metavar='list')
+    parser.add_argument('--file-name', default='diagnostic_report.tar.bz2', help='Path and file name of the generated report', metavar='file-name')
+    args = parser.parse_args()
+
+    if args.list:
+        list_reports()
+        sys.exit(0)
+
+    enable_list = parse_list(args.enable)
+    disable_list = parse_list(args.disable)
+
+    if len(enable_list) == 1 and enable_list[0] == 'all':
+        enable_all = True
+    else:
+        enable_all = False
+    if len(disable_list) == 1 and disable_list[0] == 'all':
+        disable_all = True
+    else:
+        disable_all = False
+
+    if enable_all:
+        enable_reports(None, True)
+    if disable_all:
+        enable_reports(None, False)
+    if not enable_all:
+        enable_reports(enable_list, True)
+    if not disable_all:
+        enable_reports(disable_list, False)
+
+    if args.gui:
+        try:
+            from gi.repository import Gtk, GObject, Gio, Gdk
+        except Exception, e:
+            print('GUI mode not supported: {}'.format(e))
+            sys.exit(1)
+        gui_run()
+    else:
+        create_diagnostic_report(args.file_name)
+        if args.file_name != '-':
+            print('Successfully created report at "{}".'.format(args.file_name))
