@@ -429,6 +429,8 @@ def gui_run():
     for r in sorted(report_list, key=lambda r: r.name):
         store.append([r])
 
+	builder.get_object('radio_other').set_active(True)
+
     window = builder.get_object('main_window')    
     window.connect('destroy', lambda x: Gtk.main_quit())
     window.show()
