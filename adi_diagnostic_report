@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: iso-8859-15 -*-
 #
 # Copyright (C) 2015 Analog Devices, Inc.
@@ -44,7 +44,9 @@ import os
 import sys
 import subprocess
 import tarfile
-import StringIO
+import io
+import gi
+gi.require_version("Gtk", "3.0")
 
 class DiagnosticReport():
     
@@ -63,7 +65,7 @@ def exec_program(cmd, cwd=None):
         stdout, stderr = p.communicate()
 
         return stdout
-    except Exception, e:
+    except Exception as e:
         return str(e)
  
 def read_file(*path):
@@ -71,8 +73,7 @@ def read_file(*path):
 
     if not os.path.exists(name) or os.path.isdir(name):
         return None
-
-    f = open(name)
+    f = open(name,'rb')
     buf = f.read()
     f.close()
     return buf
@@ -296,11 +297,11 @@ def add_report_to_archive(t, report, parent = ''):
             add_report_to_archive(t, value, os.path.join(parent, name))
         elif value is not None:
             info = tarfile.TarInfo(os.path.join(parent, name))
-            s = str(value)
-            info.size = len(s)
+            info.size = len(value)
             info.mtime = time.time()
             info.type = tarfile.REGTYPE
-            t.addfile(info, StringIO.StringIO(s))
+            s = bytes(str(value), 'utf-8')
+            t.addfile(info, io.BytesIO(s))
 
 def create_diagnostic_report(filename):
     report = {}
@@ -380,7 +381,7 @@ def gui_generate_report(w, builder, infobar):
         infobar.get_content_area().get_children()[0].set_text(
             'Successfully generated report.')
         infobar.show()
-    except Exception, e:
+    except Exception as e:
         infobar.set_message_type(Gtk.MessageType.ERROR)
         infobar.get_content_area().get_children()[0].set_text(
             'Failed to generate report: "{}".'.format(e))
@@ -408,7 +409,7 @@ def gui_run():
     infobar.set_default_response(Gtk.ResponseType.CLOSE)
     try:
         infobar.set_show_close_button(True)
-    except Exception, e:
+    except Exception as e:
         infobar.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)    
     infobar.connect("response", lambda w, r: w.hide())
 
@@ -429,7 +430,7 @@ def gui_run():
     for r in sorted(report_list, key=lambda r: r.name):
         store.append([r])
 
-	builder.get_object('radio_other').set_active(True)
+        builder.get_object('radio_other').set_active(True)
 
     window = builder.get_object('main_window')    
     window.connect('destroy', lambda x: Gtk.main_quit())
@@ -476,7 +477,7 @@ if __name__ == '__main__':
     if args.gui:
         try:
             from gi.repository import Gtk, GObject, Gio, Gdk
-        except Exception, e:
+        except Exception as e:
             print('GUI mode not supported: {}'.format(e))
             sys.exit(1)
         gui_run()
