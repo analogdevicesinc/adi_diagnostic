@@ -313,7 +313,7 @@ def create_diagnostic_report(filename):
             report.update(x)
 
     if filename == '-':
-        f = tarfile.open(None, 'w:bz2', sys.stdout)
+        f = tarfile.open(None, 'w:bz2', sys.stdout.buffer)
     else:
         f = tarfile.open(filename, 'w:bz2')
     add_report_to_archive(f, report)
@@ -322,8 +322,7 @@ def create_diagnostic_report(filename):
 def parse_list(l):
     if l is None:
         return []
-
-    return map(str.strip, l.split(','))
+    return list(map(str.strip, l.split(',')))
 
 def enable_reports(report_names, enable):
     if report_names is None:
@@ -364,19 +363,22 @@ def gui_generate_report(w, builder, infobar):
         path = builder.get_object('filechooserbutton_other').get_filename()
 
     try:
+        if path == None:
+            raise Exception("Path cannot be None")
+
         f = open(os.path.join(path, 'diagnostic_report.tar.bz2'), 'w')
-        p = subprocess.Popen(['gksudo', '-k', '-S',
-            '-D', 'ADI Diagnostic Report',
-            '{} --file-name - --disable all --enable {}'.format(sys.argv[0],
-            ','.join([r.name for r in report_list if r.enabled]))],
+        cmd = [
+            'pkexec', '-u', 'analog',
+            'adi_diagnostic_report','--file-name','-',
+            '--disable','all',
+            '--enable', '{}'.format(','.join([r.name for r in report_list if r.enabled]))
+        ]
+        print(cmd)
+        p = subprocess.Popen(cmd,
             stdout=f, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
         f.close()
         print(stderr)
-        print(['gksudo', '-k', '-S',
-            '-D', 'ADI Diagnostic Report',
-            '{} --file-name - --disable all --enable {}'.format(sys.argv[0],
-            ','.join([r.name for r in report_list if r.enabled]))])
         infobar.set_message_type(Gtk.MessageType.INFO)
         infobar.get_content_area().get_children()[0].set_text(
             'Successfully generated report.')
