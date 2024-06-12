@@ -3,6 +3,6 @@ Exec=@PREFIX@/bin/adi_diagnostic_report --gui
 Icon=utilities-system-monitor
 Terminal=false
 Type=Application
-Categories=System
+Categories=Science
 Name=ADI Diagnostic Report
 GenericName=ADI Diagnostic Report
