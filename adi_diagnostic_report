@@ -46,6 +46,7 @@ import subprocess
 import tarfile
 import io
 import gi
+import re
 gi.require_version("Gtk", "3.0")
 
 class DiagnosticReport():
@@ -285,6 +286,28 @@ def get_sys_bus():
     l += list_files_recursive('/sys/bus/i2c')
     l += list_files_recursive('/sys/bus/spi')
     return {'sys_bus': '\n'.join(l)}
+
+
+@diagnostic('apt-package', "Installed Debian packages checker", True)
+def get_apt_info():
+    file_path = "/var/lib/apt/lists/swdownloads.analog.com_cse_adi-repo_debian_dists_bookworm_main_binary-all_Packages"
+    if os.path.isfile(file_path):
+        grep_command = f"grep '^Package: ' {file_path} | awk '{{print $2}}'"
+        packages = subprocess.check_output(grep_command, shell=True).decode('utf-8').splitlines()
+        dpkg_command = f"dpkg -s {' '.join(packages)} 2>/dev/null | grep -B 1 -A 4 'ok installed'"
+        result = subprocess.check_output(dpkg_command, shell=True).decode('utf-8')
+        pattern = r"(Package|Architecture|Version):\s*(.+)"
+        matches = re.findall(pattern, result)
+    else:
+        return {'apt-pack': f" {file_path} The file path doesn't exist."}
+
+    formatted_lines = ""
+    for i, match in enumerate(matches):
+        formatted_lines += f"{match[0]}: {match[1]}\n"
+        if ( i + 1 ) % 3 == 0:
+            formatted_lines += "\n"
+    print(formatted_lines)
+    return {'apt-pack': formatted_lines }
 
 def add_report_to_archive(t, report, parent = ''):
 
